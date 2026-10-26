@@ -36,7 +36,7 @@ for (const envVar of requiredEnvVars) {
 // ------------------------------------------------------------
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false }
+    ssl: { rejectUnauthorized: true }
 });
 
 pool.on("connect", () => {
