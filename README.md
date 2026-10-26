@@ -207,3 +207,11 @@ Raghav Khator
 <div align="center">
   <sub>Built for a modern web experience.</sub>
 </div>
+
+
+## Security and deployment notes
+
+- The React screens still use mock marketplace data; do not treat the demo UI as a production auction service.
+- The backend requires a Supabase URL, a server-only service-role key, a PostgreSQL connection string, and a configured CLIENT_URL. Copy .env.example to .env for local development. Never commit real values or put the service-role key in a VITE_* variable.
+- Backend user-specific actions require a valid Supabase access token. Feedback administration additionally requires an administrator role in Supabase app_metadata.
+- PostgreSQL TLS certificate validation is enabled. Configure trusted certificates instead of disabling verification.
