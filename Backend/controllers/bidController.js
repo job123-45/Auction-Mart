@@ -2,7 +2,7 @@
 // bidController.js
 // Handles bid-related business logic:
 //   - placeBid      → POST /bids/place
-//   - getUserBids   → GET  /bids/user/:email
+//   - getUserBids   → GET  /bids/user/me
 //   - getAuctionBids→ GET  /bids/auction/:auction_id
 //   - getHighestBids→ GET  /bids/highest
 //
@@ -16,29 +16,38 @@ const { query, getOne, run } = require("../db");
 // Places a bid on any auction (demo or user-created)
 // ============================================================
 const placeBid = async (req, res) => {
-    const { auction_id, user_email, user_name, bid_amount, max_bid } = req.body;
+    const { auction_id, bid_amount, max_bid } = req.body;
+    const user_email = req.user.email;
+    const user_name = req.user.user_metadata?.name || user_email;
 
-    if (!auction_id || !user_email || !bid_amount) {
+    if (!auction_id || !Number.isFinite(Number(bid_amount)) || Number(bid_amount) <= 0) {
         return res.status(400).json({
-            message: "auction_id, user_email, and bid_amount are required."
+            message: "auction_id and a positive bid_amount are required."
         });
     }
 
-    let numericAuctionId = null;
-    if (typeof auction_id === 'string' && auction_id.startsWith('db-')) {
-        numericAuctionId = parseInt(auction_id.replace('db-', ''), 10);
+    const idText = String(auction_id).replace(/^db-/, "");
+    const numericAuctionId = /^\d+$/.test(idText) ? Number(idText) : null;
+    const numericBidAmount = Number(bid_amount);
+    const numericMaxBid = max_bid === undefined || max_bid === null || max_bid === "" ? null : Number(max_bid);
+
+    if (!numericAuctionId || !Number.isSafeInteger(numericAuctionId)) {
+        return res.status(400).json({ message: "A valid database auction ID is required." });
+    }
+    if (!Number.isFinite(numericBidAmount) || numericBidAmount <= 0 ||
+        (numericMaxBid !== null && (!Number.isFinite(numericMaxBid) || numericMaxBid < numericBidAmount))) {
+        return res.status(400).json({ message: "Bid amounts must be positive, and max_bid cannot be below bid_amount." });
     }
 
     try {
-        // Check if seller is trying to bid on their own item
-        if (numericAuctionId) {
-            const lot = await getOne(
-                `SELECT seller_email FROM auction_lots WHERE id = $1`,
-                [numericAuctionId]
-            );
-            if (lot && lot.seller_email === user_email) {
-                return res.status(403).json({ message: "Sellers cannot bid on their own items." });
-            }
+        const lot = await getOne(
+            `SELECT seller_email, status FROM auction_lots WHERE id = $1`,
+            [numericAuctionId]
+        );
+        if (!lot) return res.status(404).json({ message: "Auction not found." });
+        if (lot.status !== "active") return res.status(409).json({ message: "Auction is not active." });
+        if (String(lot.seller_email || "").toLowerCase() === String(user_email).toLowerCase()) {
+            return res.status(403).json({ message: "Sellers cannot bid on their own items." });
         }
 
         // First, update any previous bids by this user on this auction to 'outbid'
@@ -58,8 +67,8 @@ const placeBid = async (req, res) => {
             auction_id,
             user_email,
             user_name || null,
-            parseFloat(bid_amount),
-            max_bid ? parseFloat(max_bid) : null
+            numericBidAmount,
+            numericMaxBid
         ];
 
         const result = await run(sql, values);
@@ -68,24 +77,24 @@ const placeBid = async (req, res) => {
             message: "Bid placed successfully",
             bidId: result.rows[0].id,
             auction_id,
-            bid_amount: parseFloat(bid_amount),
+            bid_amount: numericBidAmount,
             bid_status: 'winning'
         });
     } catch (err) {
-        return res.status(500).json({ error: err.message });
+        return res.status(500).json({ message: "Unable to place bid." });
     }
 };
 
 // ============================================================
-// GET /bids/user/:email
-// Returns all bids placed by a specific user (latest per auction)
+// GET /bids/user/me
+// Returns the authenticated user's bids (latest per auction)
 // ============================================================
 const getUserBids = async (req, res) => {
-    const { email } = req.params;
+    const authenticatedEmail = req.user.email;
 
     // Get the latest bid per auction for this user
     const sql = `
-        SELECT b.*
+        SELECT b.id, b.auction_id, b.user_email, b.user_name, b.bid_amount, b.max_bid, b.bid_status, b.created_at
         FROM bids b
         INNER JOIN (
             SELECT auction_id, MAX(id) as max_id
@@ -97,10 +106,10 @@ const getUserBids = async (req, res) => {
     `;
 
     try {
-        const rows = await query(sql, [email]);
+        const rows = await query(sql, [authenticatedEmail]);
         res.status(200).json(rows);
     } catch (err) {
-        return res.status(500).json({ error: err.message });
+        return res.status(500).json({ message: "Unable to load your bids." });
     }
 };
 
@@ -110,19 +119,26 @@ const getUserBids = async (req, res) => {
 // ============================================================
 const getAuctionBids = async (req, res) => {
     const { auction_id } = req.params;
-
-    const sql = `
-        SELECT *
-        FROM bids
-        WHERE auction_id = $1
-        ORDER BY created_at DESC
-    `;
+    const idText = String(auction_id || "").replace(/^db-/, "");
+    const numericId = /^\d+$/.test(idText) ? Number(idText) : null;
+    if (!numericId || !Number.isSafeInteger(numericId)) {
+        return res.status(400).json({ message: "A valid auction ID is required." });
+    }
 
     try {
-        const rows = await query(sql, [auction_id]);
+        const auction = await getOne("SELECT status FROM auction_lots WHERE id = $1", [numericId]);
+        if (!auction || auction.status !== "active") {
+            return res.status(404).json({ message: "Auction not found." });
+        }
+
+        const rows = await query(
+            `SELECT id, auction_id, 'Bidder' AS user_name, bid_amount, bid_status, created_at
+             FROM bids WHERE auction_id IN ($1, $2) ORDER BY created_at DESC`,
+            [`db-${numericId}`, String(numericId)]
+        );
         res.status(200).json(rows);
     } catch (err) {
-        return res.status(500).json({ error: err.message });
+        return res.status(500).json({ message: "Unable to load auction bids." });
     }
 };
 
@@ -133,16 +149,21 @@ const getAuctionBids = async (req, res) => {
 // ============================================================
 const getHighestBids = async (req, res) => {
     const sql = `
+        WITH active_bids AS (
+            SELECT b.*
+            FROM bids b
+            INNER JOIN auction_lots a
+              ON (b.auction_id = 'db-' || a.id::text OR b.auction_id = a.id::text)
+            WHERE a.status = 'active'
+        )
         SELECT DISTINCT ON (b.auction_id)
             b.auction_id,
             b.bid_amount   AS highest_bid,
-            b.user_email   AS highest_bidder_email,
-            b.user_name    AS highest_bidder_name,
             counts.total_bids
-        FROM bids b
+        FROM active_bids b
         INNER JOIN (
             SELECT auction_id, MAX(bid_amount) AS max_amount, COUNT(*) AS total_bids
-            FROM bids
+            FROM active_bids
             GROUP BY auction_id
         ) counts ON b.auction_id = counts.auction_id AND b.bid_amount = counts.max_amount
         ORDER BY b.auction_id, b.created_at DESC
@@ -152,7 +173,7 @@ const getHighestBids = async (req, res) => {
         const rows = await query(sql, []);
         res.status(200).json(rows);
     } catch (err) {
-        return res.status(500).json({ error: err.message });
+        return res.status(500).json({ message: "Unable to load highest bids." });
     }
 };
 

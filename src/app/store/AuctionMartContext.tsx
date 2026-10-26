@@ -32,8 +32,6 @@ interface UserBidRecord {
 interface HighestBidRecord {
   auction_id: string;
   highest_bid: number;
-  highest_bidder_email: string;
-  highest_bidder_name: string | null;
   total_bids: number;
 }
 
@@ -246,8 +244,8 @@ export const AuctionMartProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, []);
 
   // ── Helper: refresh current user's own listings (all statuses) ──
-  const refreshMyListings = useCallback((email: string) => {
-    api.get(`/auction/user/${encodeURIComponent(email)}`)
+  const refreshMyListings = useCallback(() => {
+    api.get('/auction/user/me')
       .then(res => {
         const listings: AuctionItem[] = (res.data || []).map((row: any) => ({
           ...mapDbRowToAuctionItem(row),
@@ -274,17 +272,17 @@ export const AuctionMartProvider: React.FC<{ children: React.ReactNode }> = ({ c
       .catch(err => console.error("Failed to fetch all listings:", err));
 
     // Fetch current user's own listings — includes drafts
-    refreshMyListings(currentUser.email);
+    refreshMyListings();
 
     // Fetch user's bids
-    api.get(`/bids/user/${encodeURIComponent(currentUser.email)}`)
+    api.get('/bids/user/me')
       .then(res => {
         setUserBids(res.data || []);
       })
       .catch(err => console.error("Failed to fetch user bids:", err));
 
     // Fetch user's watchlist
-    api.get(`/watchlist/${encodeURIComponent(currentUser.email)}`)
+    api.get('/watchlist/me')
       .then(res => {
         setFavorites(res.data || []);
       })
@@ -303,13 +301,13 @@ export const AuctionMartProvider: React.FC<{ children: React.ReactNode }> = ({ c
         // Optimistic UI update
         const newFavs = prev.filter(f => f !== id);
         // Call API to remove
-        api.delete(`/watchlist/${encodeURIComponent(currentUser.email)}/${encodeURIComponent(id)}`)
+        api.delete(`/watchlist/me/${encodeURIComponent(id)}`)
           .catch(err => console.error("Failed to remove from watchlist:", err));
         return newFavs;
       } else {
         const newFavs = [...prev, id];
         // Call API to add
-        api.post('/watchlist', { user_email: currentUser.email, auction_id: id })
+        api.post('/watchlist', { auction_id: id })
           .catch(err => console.error("Failed to add to watchlist:", err));
         return newFavs;
       }
@@ -354,16 +352,12 @@ export const AuctionMartProvider: React.FC<{ children: React.ReactNode }> = ({ c
         return [...others, {
           auction_id: itemId,
           highest_bid: Math.max(existing?.highest_bid || 0, bidAmount),
-          highest_bidder_email: currentUser.email,
-          highest_bidder_name: currentUser.name,
           total_bids: (existing?.total_bids || 0) + 1
         }];
       });
 
       api.post(`/bids/place`, {
         auction_id: itemId,
-        user_email: currentUser.email,
-        user_name: currentUser.name,
         bid_amount: bidAmount,
         max_bid: maxBid || null
       })
@@ -421,16 +415,12 @@ export const AuctionMartProvider: React.FC<{ children: React.ReactNode }> = ({ c
         return [...others, {
           auction_id: itemId,
           highest_bid: Math.max(existing?.highest_bid || 0, newAmount),
-          highest_bidder_email: currentUser.email,
-          highest_bidder_name: currentUser.name,
           total_bids: (existing?.total_bids || 0) + 1
         }];
       });
 
       api.post(`/bids/place`, {
         auction_id: itemId,
-        user_email: currentUser.email,
-        user_name: currentUser.name,
         bid_amount: newAmount,
       })
         .then(res => {

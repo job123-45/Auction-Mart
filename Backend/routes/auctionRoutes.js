@@ -5,13 +5,12 @@
 // Routes:
 //   POST   /auction/create          → Create a new auction lot
 //   GET    /auction/all             → Get all auction lots
-//   GET    /auction/user/:email     → Get listings by a seller
+//   GET    /auction/user/me         → Get the authenticated user's listings
 //   GET    /auction/:id             → Get one auction lot by ID
 //   DELETE /auction/:id             → Delete an auction lot
 //   PUT    /auction/:id             → Update an auction lot
 //
-// Note: /auction/user/:email MUST be defined BEFORE /auction/:id
-//       otherwise Express will treat "user" as an :id param.
+// User-owned routes use /me paths so email addresses are not placed in URLs.
 // ============================================================
 
 const express = require("express");
@@ -20,6 +19,7 @@ const router = express.Router();
 // Import the upload middleware (Multer config)
 // "upload.single('image')" means we expect ONE file with the field name "image"
 const upload = require("../middleware/uploadMiddleware");
+const authMiddleware = require("../middleware/authMiddleware");
 
 // Import all controller functions
 const {
@@ -41,6 +41,7 @@ const {
 // ============================================================
 router.post(
     "/create",
+    authMiddleware,
     // Multer processes the files before the controller runs
     (req, res, next) => {
         upload.array("images", 5)(req, res, (err) => {
@@ -62,14 +63,13 @@ router.post(
 router.get("/all", getAllAuctions);
 
 // ============================================================
-// GET /auction/user/:email
-// Returns all listings created by a specific seller.
-// Example: GET /auction/user/raghav@gmail.com
+// GET /auction/user/me
+// Returns all listings created by the authenticated seller.
 //
 // IMPORTANT: This route is placed BEFORE /auction/:id
 //            so Express matches "user" correctly, not as an ID.
 // ============================================================
-router.get("/user/:email", getUserListings);
+router.get("/user/me", authMiddleware, getUserListings);
 
 // ============================================================
 // GET /auction/:id
@@ -83,7 +83,7 @@ router.get("/:id", getAuctionById);
 // Deletes an auction lot and its associated image file.
 // Example: DELETE /auction/5
 // ============================================================
-router.delete("/:id", deleteAuction);
+router.delete("/:id", authMiddleware, deleteAuction);
 
 // ============================================================
 // PUT /auction/:id
@@ -91,6 +91,7 @@ router.delete("/:id", deleteAuction);
 // ============================================================
 router.put(
     "/:id",
+    authMiddleware,
     (req, res, next) => {
         upload.array("images", 5)(req, res, (err) => {
             if (err) {

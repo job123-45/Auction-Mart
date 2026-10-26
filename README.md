@@ -207,3 +207,14 @@ Raghav Khator
 <div align="center">
   <sub>Built for a modern web experience.</sub>
 </div>
+
+
+## Security and deployment notes
+
+- The React screens still use mock marketplace data; do not treat the demo UI as a production auction service.
+- The backend requires a Supabase URL, a server-only service-role key, a PostgreSQL connection string, and a configured CLIENT_URL. Copy .env.example to .env for local development. Never commit real values or put the service-role key in a VITE_* variable.
+- Backend user-specific actions require a valid Supabase access token, verified server-side with Supabase Auth. The frontend forwards its current access token; the server does not trust user IDs or roles from request data.
+- Feedback administration requires an administrator role in trusted Supabase `app_metadata`, set through a server-side administrative process. User-editable `user_metadata` does not grant admin access.
+- Set `NODE_ENV=production` and `CLIENT_URL` to exactly one frontend origin in the backend runtime. Production requires HTTPS and does not allow the development localhost origins; startup fails if production CORS configuration is missing or invalid. CORS is not a substitute for API authentication.
+- Remote PostgreSQL connections use TLS with certificate verification. Local loopback PostgreSQL may use plaintext only outside production. Do not add `sslmode=disable` for a remote or production database.
+- Public auction responses omit seller email addresses; public bid history anonymizes bidders and omits private proxy `max_bid` values. User-owned routes use `/me` paths and derive the acting identity from the verified Supabase user.

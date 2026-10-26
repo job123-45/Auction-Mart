@@ -9,7 +9,7 @@ export const useNotifications = () => {
 
   useEffect(() => {
     if (currentUser?.email) {
-      api.get(`/notification/${encodeURIComponent(currentUser.email)}`)
+      api.get('/notification/me')
         .then(res => {
           if (res.data) {
             setNotifications(res.data.map((n: any) => n.message));
@@ -24,7 +24,7 @@ export const useNotifications = () => {
   const clearNotifications = () => {
     setNotifications([]);
     if (currentUser?.email) {
-      api.delete(`/notification/${encodeURIComponent(currentUser.email)}`)
+      api.delete('/notification/me')
         .catch(err => console.error("Failed to clear notifications:", err));
     }
   };
