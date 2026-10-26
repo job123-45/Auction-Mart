@@ -1,61 +1,63 @@
 const { query, run } = require("../db");
 
-// GET /notification/:email
+const ensureOwnEmail = (req, res, email) => {
+    if (String(req.user?.email || "").toLowerCase() !== String(email || "").toLowerCase()) {
+        res.status(403).json({ message: "You can only access your own notifications." });
+        return false;
+    }
+    return true;
+};
+
 const getNotifications = async (req, res) => {
-    const { email } = req.params;
+    if (!ensureOwnEmail(req, res, req.params.email)) return;
     try {
         const rows = await query(
-            `SELECT * FROM notifications WHERE user_email = $1 ORDER BY created_at DESC`,
-            [email]
+            "SELECT * FROM notifications WHERE user_email = $1 ORDER BY created_at DESC",
+            [req.user.email]
         );
         res.status(200).json(rows);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: "Unable to load notifications." });
     }
 };
 
-// POST /notification
 const createNotification = async (req, res) => {
-    const { user_email, message } = req.body;
-    if (!user_email || !message) {
-        return res.status(400).json({ message: "user_email and message required" });
+    const { message } = req.body;
+    if (typeof message !== "string" || !message.trim() || message.length > 1000) {
+        return res.status(400).json({ message: "A message of at most 1000 characters is required." });
     }
     try {
         const result = await run(
-            `INSERT INTO notifications (user_email, message) VALUES ($1, $2) RETURNING *`,
-            [user_email, message]
+            "INSERT INTO notifications (user_email, message) VALUES ($1, $2) RETURNING *",
+            [req.user.email, message.trim()]
         );
         res.status(201).json(result.rows[0]);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: "Unable to create notification." });
     }
 };
 
-// PUT /notification/:id/read
 const markAsRead = async (req, res) => {
-    const { id } = req.params;
     try {
-        await run(`UPDATE notifications SET is_read = TRUE WHERE id = $1`, [id]);
+        const result = await run(
+            "UPDATE notifications SET is_read = TRUE WHERE id = $1 AND user_email = $2",
+            [req.params.id, req.user.email]
+        );
+        if (!result.rowCount) return res.status(404).json({ message: "Notification not found." });
         res.status(200).json({ message: "Marked as read" });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: "Unable to update notification." });
     }
 };
 
-// DELETE /notification/:email
 const clearNotifications = async (req, res) => {
-    const { email } = req.params;
+    if (!ensureOwnEmail(req, res, req.params.email)) return;
     try {
-        await run(`DELETE FROM notifications WHERE user_email = $1`, [email]);
+        await run("DELETE FROM notifications WHERE user_email = $1", [req.user.email]);
         res.status(200).json({ message: "Notifications cleared" });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: "Unable to clear notifications." });
     }
 };
 
-module.exports = {
-    getNotifications,
-    createNotification,
-    markAsRead,
-    clearNotifications
-};
+module.exports = { getNotifications, createNotification, markAsRead, clearNotifications };
