@@ -194,13 +194,12 @@ const getAllAuctions = async (req, res) => {
 
     try {
         const rows = await query(
-            `SELECT * FROM auction_lots WHERE status = $1 ORDER BY created_at DESC`,
+            `SELECT id, lot_number, title, category, starting_price, sku_reference, condition_status, description, image_path, seller_name, duration, status, created_at FROM auction_lots WHERE status = $1 ORDER BY created_at DESC`,
             [appliedFilters.status]
         );
 
         console.info("[auction/all] Public listing query", {
             totalReturned: rows.length,
-            currentUserId: req.headers["x-user-id"] || null,
             appliedFilters
         });
         res.status(200).json(rows);
@@ -219,7 +218,7 @@ const getAuctionById = async (req, res) => {
 
     try {
         const row = await getOne(
-            `SELECT * FROM auction_lots WHERE id = $1`,
+            `SELECT id, lot_number, title, category, starting_price, sku_reference, condition_status, description, image_path, seller_name, duration, status, created_at FROM auction_lots WHERE id = $1`,
             [id]
         );
 
@@ -228,10 +227,6 @@ const getAuctionById = async (req, res) => {
             return res.status(404).json({
                 message: `Auction lot with id ${id} not found.`
             });
-        }
-
-        if (String(row.seller_email || "").toLowerCase() !== String(req.user.email || "").toLowerCase()) {
-            return res.status(403).json({ message: "You can only delete your own listings." });
         }
 
         res.status(200).json(row);
@@ -291,6 +286,10 @@ const deleteAuction = async (req, res) => {
             return res.status(404).json({
                 message: `Auction lot with id ${id} not found.`
             });
+        }
+
+        if (String(row.seller_email || "").toLowerCase() !== String(req.user.email || "").toLowerCase()) {
+            return res.status(403).json({ message: "You can only delete your own listings." });
         }
 
         // --------------------------------------------------------
