@@ -136,7 +136,7 @@ async function initTables() {
         await pool.query(`
             CREATE TABLE IF NOT EXISTS feedback (
                 id SERIAL PRIMARY KEY,
-                user_id INTEGER,
+                user_id TEXT,
                 username TEXT,
                 email TEXT,
                 category TEXT NOT NULL,
@@ -146,6 +146,9 @@ async function initTables() {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `);
+
+        // Supabase Auth user IDs are UUID strings; widen existing legacy integer columns safely.
+        await pool.query("ALTER TABLE feedback ALTER COLUMN user_id TYPE TEXT USING user_id::text");
 
         await pool.query(`
             CREATE TABLE IF NOT EXISTS watchlists (
