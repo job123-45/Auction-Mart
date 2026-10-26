@@ -107,11 +107,12 @@ const createAuctionLot = async (req, res) => {
         sku_reference,
         condition_status,
         description,
-        seller_email,
-        seller_name,
         duration,
         status
     } = req.body;
+
+    const seller_email = req.user.email;
+    const seller_name = req.user.user_metadata?.name || null;
 
     // --------------------------------------------------------
     // Step 2: Validate required fields
@@ -229,6 +230,10 @@ const getAuctionById = async (req, res) => {
             });
         }
 
+        if (String(row.seller_email || "").toLowerCase() !== String(req.user.email || "").toLowerCase()) {
+            return res.status(403).json({ message: "You can only delete your own listings." });
+        }
+
         res.status(200).json(row);
     } catch (err) {
         return res.status(500).json({ error: err.message });
@@ -243,6 +248,10 @@ const getAuctionById = async (req, res) => {
 const getUserListings = async (req, res) => {
     const { email } = req.params;
     const appliedFilters = { seller_email: email };
+
+    if (String(req.user.email || "").toLowerCase() !== String(email || "").toLowerCase()) {
+        return res.status(403).json({ message: "You can only view your own listings." });
+    }
 
     try {
         const rows = await query(
@@ -329,6 +338,9 @@ const updateAuction = async (req, res) => {
         const row = await getOne(`SELECT * FROM auction_lots WHERE id = $1`, [id]);
         if (!row) {
             return res.status(404).json({ message: `Auction lot with id ${id} not found.` });
+        }
+        if (String(row.seller_email || "").toLowerCase() !== String(req.user.email || "").toLowerCase()) {
+            return res.status(403).json({ message: "You can only update your own listings." });
         }
 
         let image_paths = [];
