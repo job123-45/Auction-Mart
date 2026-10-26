@@ -1,16 +1,7 @@
 const { query, run } = require("../db");
 
-const ensureOwnEmail = (req, res, email) => {
-    if (String(req.user?.email || "").toLowerCase() !== String(email || "").toLowerCase()) {
-        res.status(403).json({ message: "You can only access your own watchlist." });
-        return false;
-    }
-    return true;
-};
-
 const getWatchlist = async (req, res) => {
     const email = req.user.email;
-    if (!ensureOwnEmail(req, res, req.params.email)) return;
     try {
         const rows = await query(
             "SELECT auction_id FROM watchlists WHERE user_email = $1",
@@ -37,7 +28,6 @@ const addToWatchlist = async (req, res) => {
 };
 
 const removeFromWatchlist = async (req, res) => {
-    if (!ensureOwnEmail(req, res, req.params.email)) return;
     try {
         await run(
             "DELETE FROM watchlists WHERE user_email = $1 AND auction_id = $2",

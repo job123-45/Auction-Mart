@@ -1,16 +1,12 @@
-const { supabase } = require("../db");
-
-const authMiddleware = async (req, res, next) => {
+const createAuthMiddleware = (getUser) => async (req, res, next) => {
     const authHeader = req.headers.authorization || "";
-    if (!authHeader.startsWith("Bearer ")) {
+    const match = /^Bearer\s+(\S+)$/i.exec(authHeader);
+    if (!match) {
         return res.status(401).json({ message: "Authentication required." });
     }
 
-    const token = authHeader.slice("Bearer ".length).trim();
-    if (!token) return res.status(401).json({ message: "Authentication required." });
-
     try {
-        const { data, error } = await supabase.auth.getUser(token);
+        const { data, error } = await getUser(match[1]);
         if (error || !data.user) {
             return res.status(401).json({ message: "Invalid or expired session." });
         }
@@ -21,6 +17,10 @@ const authMiddleware = async (req, res, next) => {
     }
 };
 
+const authMiddleware = createAuthMiddleware((token) =>
+    require("../db").supabase.auth.getUser(token)
+);
+
 const requireAdmin = (req, res, next) => {
     const metadata = req.user?.app_metadata || {};
     const roles = Array.isArray(metadata.roles) ? metadata.roles : [];
@@ -30,3 +30,4 @@ const requireAdmin = (req, res, next) => {
 
 module.exports = authMiddleware;
 module.exports.requireAdmin = requireAdmin;
+module.exports.createAuthMiddleware = createAuthMiddleware;

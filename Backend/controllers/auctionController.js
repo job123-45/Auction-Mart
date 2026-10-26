@@ -4,7 +4,7 @@
 //   - createAuctionLot    → POST /auction/create
 //   - getAllAuctions       → GET  /auction/all
 //   - getAuctionById      → GET  /auction/:id
-//   - getUserListings     → GET  /auction/user/:email
+//   - getUserListings     → GET  /auction/user/me
 //   - deleteAuction       → DELETE /auction/:id
 //
 // Uses Supabase PostgreSQL for data and Supabase Storage
@@ -53,8 +53,7 @@ async function uploadToSupabaseStorage(files) {
             });
 
         if (error) {
-            console.error("Supabase Storage upload complete error:", JSON.stringify(error, null, 2));
-            throw new Error(`Failed to upload image ${file.originalname} to Supabase Storage: ${error.message || JSON.stringify(error)}`);
+            throw new Error("Storage upload failed.");
         }
 
         // Get the public URL
@@ -83,11 +82,9 @@ async function deleteFromSupabaseStorage(publicUrl) {
             .from("product-images")
             .remove([storagePath]);
 
-        if (error) {
-            console.warn("Warning: Could not delete image from storage:", error.message);
-        }
+        if (error) console.warn("Warning: Could not delete an auction image from storage.");
     } catch (err) {
-        console.warn("Warning: Error deleting image from storage:", err.message);
+        console.warn("Warning: Error deleting an auction image from storage.");
     }
 }
 
@@ -179,8 +176,8 @@ const createAuctionLot = async (req, res) => {
             auctionId: result.rows[0].id
         });
     } catch (err) {
-        console.error("Error creating auction lot:", err.message);
-        return res.status(500).json({ error: err.message });
+        console.error("Error creating auction lot.");
+        return res.status(500).json({ message: "Unable to create auction lot." });
     }
 };
 
@@ -194,7 +191,7 @@ const getAllAuctions = async (req, res) => {
 
     try {
         const rows = await query(
-            `SELECT id, lot_number, title, category, starting_price, sku_reference, condition_status, description, image_path, seller_name, duration, status, created_at FROM auction_lots WHERE status = $1 ORDER BY created_at DESC`,
+            `SELECT id, lot_number, title, category, starting_price, sku_reference, condition_status, description, image_path, CASE WHEN seller_name LIKE '%@%' THEN 'Seller' ELSE seller_name END AS seller_name, duration, status, created_at FROM auction_lots WHERE status = $1 ORDER BY created_at DESC`,
             [appliedFilters.status]
         );
 
@@ -204,7 +201,7 @@ const getAllAuctions = async (req, res) => {
         });
         res.status(200).json(rows);
     } catch (err) {
-        return res.status(500).json({ error: err.message });
+        return res.status(500).json({ message: "Unable to load auctions." });
     }
 };
 
@@ -218,7 +215,7 @@ const getAuctionById = async (req, res) => {
 
     try {
         const row = await getOne(
-            `SELECT id, lot_number, title, category, starting_price, sku_reference, condition_status, description, image_path, seller_name, duration, status, created_at FROM auction_lots WHERE id = $1`,
+            `SELECT id, lot_number, title, category, starting_price, sku_reference, condition_status, description, image_path, CASE WHEN seller_name LIKE '%@%' THEN 'Seller' ELSE seller_name END AS seller_name, duration, status, created_at FROM auction_lots WHERE id = $1`,
             [id]
         );
 
@@ -231,37 +228,26 @@ const getAuctionById = async (req, res) => {
 
         res.status(200).json(row);
     } catch (err) {
-        return res.status(500).json({ error: err.message });
+        return res.status(500).json({ message: "Unable to load auction." });
     }
 };
 
 // ============================================================
-// API 4: GET LISTINGS BY SELLER EMAIL
-// GET /auction/user/:email
-// Returns all listings created by a specific seller
+// API 4: GET THE AUTHENTICATED SELLER'S LISTINGS
+// GET /auction/user/me
 // ============================================================
 const getUserListings = async (req, res) => {
-    const { email } = req.params;
-    const appliedFilters = { seller_email: email };
-
-    if (String(req.user.email || "").toLowerCase() !== String(email || "").toLowerCase()) {
-        return res.status(403).json({ message: "You can only view your own listings." });
-    }
+    const authenticatedEmail = req.user.email;
 
     try {
         const rows = await query(
-            `SELECT * FROM auction_lots WHERE seller_email = $1 ORDER BY created_at DESC`,
-            [email]
+            `SELECT id, lot_number, title, category, starting_price, sku_reference, condition_status, description, image_path, seller_email, seller_name, duration, status, created_at FROM auction_lots WHERE lower(seller_email) = lower($1) ORDER BY created_at DESC`,
+            [authenticatedEmail]
         );
 
-        console.info("[auction/user] My Listings query", {
-            totalReturned: rows.length,
-            currentUserId: req.headers["x-user-id"] || null,
-            appliedFilters
-        });
         res.status(200).json(rows);
     } catch (err) {
-        return res.status(500).json({ error: err.message });
+        return res.status(500).json({ message: "Unable to load your listings." });
     }
 };
 
@@ -278,7 +264,7 @@ const deleteAuction = async (req, res) => {
         // Step 1: Find the auction lot to get its image_path
         // --------------------------------------------------------
         const row = await getOne(
-            `SELECT * FROM auction_lots WHERE id = $1`,
+            `SELECT id, seller_email, image_path FROM auction_lots WHERE id = $1`,
             [id]
         );
 
@@ -293,25 +279,29 @@ const deleteAuction = async (req, res) => {
         }
 
         // --------------------------------------------------------
-        // Step 2: Delete the image files from Supabase Storage
+        // Step 2: Delete the row only if ownership still matches in the database.
         // --------------------------------------------------------
-        if (row.image_path) {
-            const paths = row.image_path.split(",");
+        const deleted = await run(
+            `DELETE FROM auction_lots WHERE id = $1 AND lower(seller_email) = lower($2) RETURNING image_path`,
+            [id, req.user.email]
+        );
+        if (!deleted.rowCount) {
+            return res.status(404).json({ message: "Auction lot is no longer available." });
+        }
+
+        // Step 3: Remove its storage objects after the authorized row deletion.
+        if (deleted.rows[0]?.image_path) {
+            const paths = deleted.rows[0].image_path.split(",");
             for (const imgPath of paths) {
                 await deleteFromSupabaseStorage(imgPath.trim());
             }
         }
 
-        // --------------------------------------------------------
-        // Step 3: Delete the record from PostgreSQL
-        // --------------------------------------------------------
-        await run(`DELETE FROM auction_lots WHERE id = $1`, [id]);
-
         res.status(200).json({
             message: `Auction lot with id ${id} deleted successfully.`
         });
     } catch (err) {
-        return res.status(500).json({ error: err.message });
+        return res.status(500).json({ message: "Unable to delete auction lot." });
     }
 };
 
@@ -342,10 +332,8 @@ const updateAuction = async (req, res) => {
             return res.status(403).json({ message: "You can only update your own listings." });
         }
 
-        let image_paths = [];
-        if (existing_images) {
-            image_paths = existing_images.split(",").map(s => s.trim()).filter(s => s);
-        }
+        const imagesToKeep = existing_images === undefined ? row.image_path || "" : existing_images;
+        let image_paths = imagesToKeep.split(",").map(s => s.trim()).filter(s => s);
 
         if (req.files && req.files.length > 0) {
             const urls = await uploadToSupabaseStorage(req.files);
@@ -358,7 +346,7 @@ const updateAuction = async (req, res) => {
             UPDATE auction_lots
             SET title = $1, category = $2, starting_price = $3, sku_reference = $4,
                 condition_status = $5, description = $6, image_path = $7, duration = $8, status = $9
-            WHERE id = $10
+            WHERE id = $10 AND lower(seller_email) = lower($11)
         `;
 
         const values = [
@@ -371,15 +359,19 @@ const updateAuction = async (req, res) => {
             final_image_path !== undefined ? final_image_path : row.image_path,
             duration ? parseInt(duration) : row.duration,
             status || row.status,
-            id
+            id,
+            req.user.email
         ];
 
-        await run(sql, values);
+        const result = await run(sql, values);
+        if (!result.rowCount) {
+            return res.status(404).json({ message: "Auction lot is no longer available." });
+        }
 
         res.status(200).json({ message: "Auction lot updated successfully" });
     } catch (err) {
-        console.error("Error updating auction lot:", err.message);
-        return res.status(500).json({ error: err.message });
+        console.error("Error updating auction lot.");
+        return res.status(500).json({ message: "Unable to update auction lot." });
     }
 };
 

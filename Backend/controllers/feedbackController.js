@@ -25,10 +25,10 @@ const submitFeedback = async (req, res) => {
             return res.status(400).json({ success: false, message: "Message must be between 10 and 2000 characters" });
         }
 
-        // Get user info from token (guaranteed since authMiddleware is applied)
+        // Use verified Supabase identity when present; anonymous feedback has no account fields.
         const user_id = req.user ? req.user.id : null;
         const email = req.user ? req.user.email : null;
-        const username = req.user ? req.user.name : null;
+        const username = req.user?.user_metadata?.name || null;
 
         const feedbackData = {
             user_id,
@@ -47,7 +47,7 @@ const submitFeedback = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Error submitting feedback:", error);
+        console.error("Error submitting feedback.");
         return res.status(500).json({ success: false, message: "Server Error" });
     }
 };
@@ -57,7 +57,7 @@ const getAllFeedback = async (req, res) => {
         const feedback = await feedbackService.getAllFeedback();
         res.status(200).json({ success: true, feedback });
     } catch (error) {
-        console.error("Error getting all feedback:", error);
+        console.error("Error getting all feedback.");
         res.status(500).json({ success: false, message: "Server Error" });
     }
 };
@@ -73,7 +73,7 @@ const getFeedbackById = async (req, res) => {
         
         res.status(200).json({ success: true, feedback });
     } catch (error) {
-        console.error("Error getting feedback by id:", error);
+        console.error("Error getting feedback by id.");
         res.status(500).json({ success: false, message: "Server Error" });
     }
 };
@@ -96,7 +96,7 @@ const updateFeedbackStatus = async (req, res) => {
 
         res.status(200).json({ success: true, message: "Feedback status updated" });
     } catch (error) {
-        console.error("Error updating feedback status:", error);
+        console.error("Error updating feedback status.");
         res.status(500).json({ success: false, message: "Server Error" });
     }
 };

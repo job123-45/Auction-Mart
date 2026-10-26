@@ -2,7 +2,7 @@
 // bidController.js
 // Handles bid-related business logic:
 //   - placeBid      → POST /bids/place
-//   - getUserBids   → GET  /bids/user/:email
+//   - getUserBids   → GET  /bids/user/me
 //   - getAuctionBids→ GET  /bids/auction/:auction_id
 //   - getHighestBids→ GET  /bids/highest
 //
@@ -81,24 +81,20 @@ const placeBid = async (req, res) => {
             bid_status: 'winning'
         });
     } catch (err) {
-        return res.status(500).json({ error: err.message });
+        return res.status(500).json({ message: "Unable to place bid." });
     }
 };
 
 // ============================================================
-// GET /bids/user/:email
-// Returns all bids placed by a specific user (latest per auction)
+// GET /bids/user/me
+// Returns the authenticated user's bids (latest per auction)
 // ============================================================
 const getUserBids = async (req, res) => {
-    const { email } = req.params;
-
-    if (String(req.user.email || "").toLowerCase() !== String(email || "").toLowerCase()) {
-        return res.status(403).json({ message: "You can only view your own bids." });
-    }
+    const authenticatedEmail = req.user.email;
 
     // Get the latest bid per auction for this user
     const sql = `
-        SELECT b.*
+        SELECT b.id, b.auction_id, b.user_email, b.user_name, b.bid_amount, b.max_bid, b.bid_status, b.created_at
         FROM bids b
         INNER JOIN (
             SELECT auction_id, MAX(id) as max_id
@@ -110,10 +106,10 @@ const getUserBids = async (req, res) => {
     `;
 
     try {
-        const rows = await query(sql, [email]);
+        const rows = await query(sql, [authenticatedEmail]);
         res.status(200).json(rows);
     } catch (err) {
-        return res.status(500).json({ error: err.message });
+        return res.status(500).json({ message: "Unable to load your bids." });
     }
 };
 
@@ -123,19 +119,26 @@ const getUserBids = async (req, res) => {
 // ============================================================
 const getAuctionBids = async (req, res) => {
     const { auction_id } = req.params;
-
-    const sql = `
-        SELECT id, auction_id, user_name, bid_amount, max_bid, bid_status, created_at
-        FROM bids
-        WHERE auction_id = $1
-        ORDER BY created_at DESC
-    `;
+    const idText = String(auction_id || "").replace(/^db-/, "");
+    const numericId = /^\d+$/.test(idText) ? Number(idText) : null;
+    if (!numericId || !Number.isSafeInteger(numericId)) {
+        return res.status(400).json({ message: "A valid auction ID is required." });
+    }
 
     try {
-        const rows = await query(sql, [auction_id]);
+        const auction = await getOne("SELECT status FROM auction_lots WHERE id = $1", [numericId]);
+        if (!auction || auction.status !== "active") {
+            return res.status(404).json({ message: "Auction not found." });
+        }
+
+        const rows = await query(
+            `SELECT id, auction_id, 'Bidder' AS user_name, bid_amount, bid_status, created_at
+             FROM bids WHERE auction_id IN ($1, $2) ORDER BY created_at DESC`,
+            [`db-${numericId}`, String(numericId)]
+        );
         res.status(200).json(rows);
     } catch (err) {
-        return res.status(500).json({ error: err.message });
+        return res.status(500).json({ message: "Unable to load auction bids." });
     }
 };
 
@@ -146,15 +149,21 @@ const getAuctionBids = async (req, res) => {
 // ============================================================
 const getHighestBids = async (req, res) => {
     const sql = `
+        WITH active_bids AS (
+            SELECT b.*
+            FROM bids b
+            INNER JOIN auction_lots a
+              ON (b.auction_id = 'db-' || a.id::text OR b.auction_id = a.id::text)
+            WHERE a.status = 'active'
+        )
         SELECT DISTINCT ON (b.auction_id)
             b.auction_id,
             b.bid_amount   AS highest_bid,
-            b.user_name    AS highest_bidder_name,
             counts.total_bids
-        FROM bids b
+        FROM active_bids b
         INNER JOIN (
             SELECT auction_id, MAX(bid_amount) AS max_amount, COUNT(*) AS total_bids
-            FROM bids
+            FROM active_bids
             GROUP BY auction_id
         ) counts ON b.auction_id = counts.auction_id AND b.bid_amount = counts.max_amount
         ORDER BY b.auction_id, b.created_at DESC
@@ -164,7 +173,7 @@ const getHighestBids = async (req, res) => {
         const rows = await query(sql, []);
         res.status(200).json(rows);
     } catch (err) {
-        return res.status(500).json({ error: err.message });
+        return res.status(500).json({ message: "Unable to load highest bids." });
     }
 };
 

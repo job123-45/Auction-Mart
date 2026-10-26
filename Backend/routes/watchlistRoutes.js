@@ -3,8 +3,8 @@ const router = express.Router();
 const authMiddleware = require("../middleware/authMiddleware");
 const watchlistController = require("../controllers/watchlistController");
 
-router.get("/:email", authMiddleware, watchlistController.getWatchlist);
+router.get("/me", authMiddleware, watchlistController.getWatchlist);
 router.post("/", authMiddleware, watchlistController.addToWatchlist);
-router.delete("/:email/:auctionId", authMiddleware, watchlistController.removeFromWatchlist);
+router.delete("/me/:auctionId", authMiddleware, watchlistController.removeFromWatchlist);
 
 module.exports = router;

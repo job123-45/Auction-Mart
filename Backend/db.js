@@ -10,6 +10,7 @@
 
 const { Pool } = require("pg");
 const { createClient } = require("@supabase/supabase-js");
+const { createPostgresConfig, validateSupabaseUrl } = require("./securityConfig");
 const dns = require("dns");
 
 // Force Node.js to try IPv6 addresses first.
@@ -31,20 +32,19 @@ for (const envVar of requiredEnvVars) {
     }
 }
 
+const supabaseUrl = validateSupabaseUrl(process.env.SUPABASE_URL, process.env);
+
 // ------------------------------------------------------------
 // PostgreSQL Pool — connects to Supabase PostgreSQL
 // ------------------------------------------------------------
-const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: true }
-});
+const pool = new Pool(createPostgresConfig(process.env.DATABASE_URL, process.env));
 
 pool.on("connect", () => {
     console.log("Connected to Supabase PostgreSQL");
 });
 
 pool.on("error", (err) => {
-    console.error("Unexpected PostgreSQL pool error:", err.message);
+    console.error("Unexpected PostgreSQL pool error.", { code: err.code || "unknown" });
 });
 
 // ------------------------------------------------------------
@@ -55,7 +55,6 @@ const WebSocket = require("ws");
 // detects it during WebSocketFactory.detectEnvironment() checks
 global.WebSocket = WebSocket;
 
-const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey, {
     auth: {
@@ -147,8 +146,21 @@ async function initTables() {
             )
         `);
 
-        // Supabase Auth user IDs are UUID strings; widen existing legacy integer columns safely.
-        await pool.query("ALTER TABLE feedback ALTER COLUMN user_id TYPE TEXT USING user_id::text");
+        // Migrate the legacy integer column once; avoid an unnecessary table lock on later starts.
+        await pool.query(`
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'feedback'
+                      AND column_name = 'user_id'
+                      AND data_type <> 'text'
+                ) THEN
+                    ALTER TABLE feedback ALTER COLUMN user_id TYPE TEXT USING user_id::text;
+                END IF;
+            END $$
+        `);
 
         await pool.query(`
             CREATE TABLE IF NOT EXISTS watchlists (
@@ -172,7 +184,7 @@ async function initTables() {
 
         console.log("PostgreSQL tables verified / created successfully.");
     } catch (err) {
-        console.error("Error creating tables:", err.message);
+        console.error("Error initializing PostgreSQL tables.", { code: err.code || "unknown" });
     }
 }
 

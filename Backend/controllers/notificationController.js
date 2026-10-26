@@ -1,18 +1,9 @@
 const { query, run } = require("../db");
 
-const ensureOwnEmail = (req, res, email) => {
-    if (String(req.user?.email || "").toLowerCase() !== String(email || "").toLowerCase()) {
-        res.status(403).json({ message: "You can only access your own notifications." });
-        return false;
-    }
-    return true;
-};
-
 const getNotifications = async (req, res) => {
-    if (!ensureOwnEmail(req, res, req.params.email)) return;
     try {
         const rows = await query(
-            "SELECT * FROM notifications WHERE user_email = $1 ORDER BY created_at DESC",
+            "SELECT id, message, is_read, created_at FROM notifications WHERE user_email = $1 ORDER BY created_at DESC",
             [req.user.email]
         );
         res.status(200).json(rows);
@@ -28,7 +19,7 @@ const createNotification = async (req, res) => {
     }
     try {
         const result = await run(
-            "INSERT INTO notifications (user_email, message) VALUES ($1, $2) RETURNING *",
+            "INSERT INTO notifications (user_email, message) VALUES ($1, $2) RETURNING id, message, is_read, created_at",
             [req.user.email, message.trim()]
         );
         res.status(201).json(result.rows[0]);
@@ -51,7 +42,6 @@ const markAsRead = async (req, res) => {
 };
 
 const clearNotifications = async (req, res) => {
-    if (!ensureOwnEmail(req, res, req.params.email)) return;
     try {
         await run("DELETE FROM notifications WHERE user_email = $1", [req.user.email]);
         res.status(200).json({ message: "Notifications cleared" });

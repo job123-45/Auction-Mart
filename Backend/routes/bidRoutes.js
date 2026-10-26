@@ -9,8 +9,8 @@ router.post("/place", authMiddleware, placeBid);
 // GET /bids/highest — Get highest bid + count per auction
 router.get("/highest", getHighestBids);
 
-// GET /bids/user/:email — Get all bids by a user
-router.get("/user/:email", authMiddleware, getUserBids);
+// GET /bids/user/me — Get the authenticated user's bids
+router.get("/user/me", authMiddleware, getUserBids);
 
 // GET /bids/auction/:auction_id - Get all bids for an auction
 router.get("/auction/:auction_id", getAuctionBids);

@@ -107,8 +107,6 @@ export const MyListings: React.FC<MyListingsProps> = ({
     formData.append('sku_reference', newSku);
     formData.append('condition_status', newCondition);
     formData.append('description', newDescription || '');
-    formData.append('seller_email', currentUser?.email || '');
-    formData.append('seller_name', currentUser?.name || '');
     formData.append('duration', newDuration.toString());
     formData.append('status', status);
 

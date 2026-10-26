@@ -1,6 +1,8 @@
 require("dotenv").config({ path: require("path").resolve(__dirname, "../.env") });
 const express = require("express");
 const path = require("path");
+const { createCorsOptions } = require("./securityConfig");
+const corsOptions = createCorsOptions(process.env);
 require("./db");
 const cors = require("cors");
 
@@ -16,21 +18,7 @@ const bidRoutes = require("./routes/bidRoutes");
 const watchlistRoutes = require("./routes/watchlistRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 
-const allowedOrigins = [
-    "http://localhost:5173",
-    "http://localhost:3000",
-    process.env.CLIENT_URL
-].filter(Boolean);
-
-app.use(cors({
-    origin(origin, callback) {
-        if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
-        return callback(new Error("Origin is not allowed by CORS"));
-    },
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"]
-}));
+app.use(cors(corsOptions));
 app.use(express.json({ limit: "1mb" }));
 
 // Removed /uploads route as we use Supabase storage exclusively
