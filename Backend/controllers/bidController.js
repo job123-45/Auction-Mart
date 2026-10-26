@@ -26,21 +26,28 @@ const placeBid = async (req, res) => {
         });
     }
 
-    let numericAuctionId = null;
-    if (typeof auction_id === 'string' && auction_id.startsWith('db-')) {
-        numericAuctionId = parseInt(auction_id.replace('db-', ''), 10);
+    const idText = String(auction_id).replace(/^db-/, "");
+    const numericAuctionId = /^\d+$/.test(idText) ? Number(idText) : null;
+    const numericBidAmount = Number(bid_amount);
+    const numericMaxBid = max_bid === undefined || max_bid === null || max_bid === "" ? null : Number(max_bid);
+
+    if (!numericAuctionId || !Number.isSafeInteger(numericAuctionId)) {
+        return res.status(400).json({ message: "A valid database auction ID is required." });
+    }
+    if (!Number.isFinite(numericBidAmount) || numericBidAmount <= 0 ||
+        (numericMaxBid !== null && (!Number.isFinite(numericMaxBid) || numericMaxBid < numericBidAmount))) {
+        return res.status(400).json({ message: "Bid amounts must be positive, and max_bid cannot be below bid_amount." });
     }
 
     try {
-        // Check if seller is trying to bid on their own item
-        if (numericAuctionId) {
-            const lot = await getOne(
-                `SELECT seller_email FROM auction_lots WHERE id = $1`,
-                [numericAuctionId]
-            );
-            if (lot && String(lot.seller_email).toLowerCase() === String(user_email).toLowerCase()) {
-                return res.status(403).json({ message: "Sellers cannot bid on their own items." });
-            }
+        const lot = await getOne(
+            `SELECT seller_email, status FROM auction_lots WHERE id = $1`,
+            [numericAuctionId]
+        );
+        if (!lot) return res.status(404).json({ message: "Auction not found." });
+        if (lot.status !== "active") return res.status(409).json({ message: "Auction is not active." });
+        if (String(lot.seller_email || "").toLowerCase() === String(user_email).toLowerCase()) {
+            return res.status(403).json({ message: "Sellers cannot bid on their own items." });
         }
 
         // First, update any previous bids by this user on this auction to 'outbid'
@@ -60,8 +67,8 @@ const placeBid = async (req, res) => {
             auction_id,
             user_email,
             user_name || null,
-            parseFloat(bid_amount),
-            max_bid ? parseFloat(max_bid) : null
+            numericBidAmount,
+            numericMaxBid
         ];
 
         const result = await run(sql, values);
@@ -70,7 +77,7 @@ const placeBid = async (req, res) => {
             message: "Bid placed successfully",
             bidId: result.rows[0].id,
             auction_id,
-            bid_amount: parseFloat(bid_amount),
+            bid_amount: numericBidAmount,
             bid_status: 'winning'
         });
     } catch (err) {
