@@ -16,11 +16,13 @@ const { query, getOne, run } = require("../db");
 // Places a bid on any auction (demo or user-created)
 // ============================================================
 const placeBid = async (req, res) => {
-    const { auction_id, user_email, user_name, bid_amount, max_bid } = req.body;
+    const { auction_id, bid_amount, max_bid } = req.body;
+    const user_email = req.user.email;
+    const user_name = req.user.user_metadata?.name || user_email;
 
-    if (!auction_id || !user_email || !bid_amount) {
+    if (!auction_id || !Number.isFinite(Number(bid_amount)) || Number(bid_amount) <= 0) {
         return res.status(400).json({
-            message: "auction_id, user_email, and bid_amount are required."
+            message: "auction_id and a positive bid_amount are required."
         });
     }
 
@@ -36,7 +38,7 @@ const placeBid = async (req, res) => {
                 `SELECT seller_email FROM auction_lots WHERE id = $1`,
                 [numericAuctionId]
             );
-            if (lot && lot.seller_email === user_email) {
+            if (lot && String(lot.seller_email).toLowerCase() === String(user_email).toLowerCase()) {
                 return res.status(403).json({ message: "Sellers cannot bid on their own items." });
             }
         }
@@ -83,6 +85,10 @@ const placeBid = async (req, res) => {
 const getUserBids = async (req, res) => {
     const { email } = req.params;
 
+    if (String(req.user.email || "").toLowerCase() !== String(email || "").toLowerCase()) {
+        return res.status(403).json({ message: "You can only view your own bids." });
+    }
+
     // Get the latest bid per auction for this user
     const sql = `
         SELECT b.*
@@ -112,7 +118,7 @@ const getAuctionBids = async (req, res) => {
     const { auction_id } = req.params;
 
     const sql = `
-        SELECT *
+        SELECT id, auction_id, user_name, bid_amount, max_bid, bid_status, created_at
         FROM bids
         WHERE auction_id = $1
         ORDER BY created_at DESC
@@ -136,7 +142,6 @@ const getHighestBids = async (req, res) => {
         SELECT DISTINCT ON (b.auction_id)
             b.auction_id,
             b.bid_amount   AS highest_bid,
-            b.user_email   AS highest_bidder_email,
             b.user_name    AS highest_bidder_name,
             counts.total_bids
         FROM bids b
